@@ -33,10 +33,26 @@ namespace App
 
         [DllImport(Path)]
         public static extern int InvokeWithInt(int arg);
+
+        [DllImport(Path)]
+        public static extern void SetInvokerObject(void* fptr, void* obj);
+
+        [DllImport(Path)]
+        public static extern int InvokeWithIntFast(int arg);
     }
+
 
     unsafe class Program
     {
+        delegate void Callback_t(IntPtr obj, int arg);
+        static Callback_t CallbackInstance;
+
+        static void Callback(IntPtr obj, int arg)
+        {
+            var handle = GCHandle.FromIntPtr(obj);
+            ((IInvoker)handle.Target).InvokeWithInt(arg);
+        }
+
         static void Main(string[] args)
         {
             var mInvoker = new ManagedInvoker();
@@ -46,6 +62,21 @@ namespace App
             interop.SetInvoker(pUnk.ToPointer());
             NativeLib.SetInvoker(pUnk.ToPointer());
 
+            // Instead of marshalling or projecting an interface over an object
+            // pass a handle to the object and unwrap it on demand. This does place
+            // some additional pressure on the GC when done excessively, but a single
+            // instance is practically noise if it is only one object.
+            //
+            // The delegate must be stored somewhere or else the GC will collected it.
+            // This is because the returned function pointer doesn't count as a
+            // reference.
+            CallbackInstance = new Callback_t(Callback);
+            var fptr = Marshal.GetFunctionPointerForDelegate(CallbackInstance);
+
+            // Remember to free the handle or the GC will never collect the object.
+            GCHandle handle = GCHandle.Alloc(mInvoker);
+            NativeLib.SetInvokerObject(fptr.ToPointer(), GCHandle.ToIntPtr(handle).ToPointer());
+
             // Warm up process
             for (int i = 0; i < 100; ++i)
             {
@@ -53,6 +84,7 @@ namespace App
                 interop.InvokeWithObject(i);
                 NativeLib.InvokeWithInt(i);
                 NativeLib.InvokeWithObject(i);
+                NativeLib.InvokeWithIntFast(i);
             }
 
             // Measure
@@ -96,6 +128,16 @@ namespace App
                 }
                 sw.Stop();
                 Console.WriteLine($"{nameof(NativeLib)}.{nameof(NativeLib.InvokeWithObject)} - {sw.ElapsedMilliseconds}");
+            }
+            {
+                var sw = new Stopwatch();
+                sw.Start();
+                for (int i = 0; i < iterations; ++i)
+                {
+                    NativeLib.InvokeWithIntFast(i);
+                }
+                sw.Stop();
+                Console.WriteLine($"{nameof(NativeLib)}.{nameof(NativeLib.InvokeWithIntFast)} - {sw.ElapsedMilliseconds}");
             }
         }
     }

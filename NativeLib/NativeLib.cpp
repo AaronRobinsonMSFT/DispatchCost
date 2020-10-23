@@ -29,3 +29,18 @@ extern "C" __declspec(dllexport) int InvokeWithInt(int arg)
 {
     return (int)comInvoker->InvokeWithInt(arg);
 }
+
+using Callback_t = void (STDMETHODCALLTYPE*)(void*, int);
+Callback_t Callback;
+void* ManagedObj;
+
+extern "C" __declspec(dllexport) void SetInvokerObject(Callback_t fptr, void* obj)
+{
+    Callback = fptr;
+    ManagedObj = obj;
+}
+
+extern "C" __declspec(dllexport) void InvokeWithIntFast(int arg)
+{
+    Callback(ManagedObj, arg);
+}
